@@ -1,0 +1,17 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run Sentinel Demo",
+			"type": "shell",
+			"command": "sentinel",
+			"args": [
+				"run",
+				"Find launch contradictions and next actions",
+				"--context-file",
+				"docs/sample-knowledge-base.md"
+			],
+			"isBackground": false
+		}
+	]
+}
