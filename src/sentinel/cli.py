@@ -66,3 +66,56 @@ def evaluate(dataset: Path = typer.Argument(..., exists=True, readable=True)) ->
     header, *body = rows
     print(f"Loaded {len(body)} eval rows from {dataset}")
     print("Use DigitalOcean native eval tooling for leaderboard-grade results.")
+
+
+@app.command()
+def ls() -> None:
+    """List all Sentinel agents currently deployed in DigitalOcean."""
+    settings = get_settings()
+    if settings.enable_mock or not settings.do_api_token:
+        print("[yellow]Mock mode — no live agents.[/yellow]")
+        return
+    client = DigitalOceanAgentClient(settings)
+    import httpx
+    with httpx.Client(timeout=15) as http:
+        r = http.get(
+            f"{settings.do_agent_base_url.rstrip('/')}/agents",
+            headers={"Authorization": f"Bearer {settings.do_api_token}"},
+        )
+        r.raise_for_status()
+    agents = r.json().get("agents", [])
+    sentinel_agents = [a for a in agents if (a.get("name") or "").startswith("sentinel-")]
+    print(f"[bold]{len(sentinel_agents)}[/bold] Sentinel agents on DigitalOcean:")
+    for a in sentinel_agents:
+        dep = a.get("deployment", {})
+        print(f"  {a.get('name'):40s}  {a.get('uuid', '')}  status={dep.get('status', '?')}")
+
+
+@app.command()
+def cleanup() -> None:
+    """Delete all ephemeral Sentinel agents from DigitalOcean."""
+    settings = get_settings()
+    if settings.enable_mock or not settings.do_api_token:
+        print("[yellow]Mock mode — nothing to clean.[/yellow]")
+        return
+    import httpx
+    with httpx.Client(timeout=15) as http:
+        r = http.get(
+            f"{settings.do_agent_base_url.rstrip('/')}/agents",
+            headers={"Authorization": f"Bearer {settings.do_api_token}"},
+        )
+        r.raise_for_status()
+    agents = r.json().get("agents", [])
+    targets = [a for a in agents if (a.get("name") or "").startswith("sentinel-")]
+    print(f"Deleting {len(targets)} Sentinel agents...")
+    client = DigitalOceanAgentClient(settings)
+    ok, fail = 0, 0
+    for a in targets:
+        try:
+            client.delete_agent(a["uuid"])
+            print(f"  [green]deleted[/green] {a.get('name')}")
+            ok += 1
+        except Exception as exc:
+            print(f"  [red]failed[/red] {a.get('name')}: {exc}")
+            fail += 1
+    print(f"Done — {ok} deleted, {fail} failed.")

@@ -16,6 +16,7 @@ class DigitalOceanAgentClient:
             "Authorization": f"Bearer {settings.do_api_token}",
             "Content-Type": "application/json",
         }
+        self._model_uuid_cache: dict[str, str] = {}
 
     def _agents_url(self) -> str:
         return f"{self.settings.do_agent_base_url.rstrip('/')}/agents"
@@ -24,13 +25,17 @@ class DigitalOceanAgentClient:
         return f"{self.settings.do_agent_base_url.rstrip('/')}/models"
 
     def _resolve_model_uuid(self, model_id_or_slug: str) -> str:
+        if model_id_or_slug in self._model_uuid_cache:
+            return self._model_uuid_cache[model_id_or_slug]
         with httpx.Client(timeout=30) as client:
             response = client.get(self._models_url(), headers=self._headers)
             response.raise_for_status()
             models = response.json().get("models", [])
         for model in models:
             if model.get("id") == model_id_or_slug or model.get("inference_name") == model_id_or_slug:
-                return model.get("uuid", "")
+                uuid = model.get("uuid", "")
+                self._model_uuid_cache[model_id_or_slug] = uuid
+                return uuid
         raise ValueError(f"Could not resolve model UUID for '{model_id_or_slug}'")
 
     def create_agent(self, spec: AgentSpec) -> dict[str, Any]:
@@ -84,6 +89,10 @@ class DigitalOceanAgentClient:
         agent["id"] = agent.get("uuid") or agent.get("id")
         return agent
 
+    def delete_agent(self, agent_id: str) -> None:
+        with httpx.Client(timeout=15) as client:
+            client.delete(f"{self._agents_url()}/{agent_id}", headers=self._headers)
+
     def run_agent(self, agent_id: str, prompt: str) -> dict[str, Any]:
         # DigitalOcean separates management (agent CRUD) and inference (model access key).
         # If no model access key is configured yet, return a deterministic instruction.
@@ -108,29 +117,28 @@ class DigitalOceanAgentClient:
             "Content-Type": "application/json",
         }
         with httpx.Client(timeout=90) as client:
-            response = client.post(infer_url, headers=headers, json=payload)
-            response.raise_for_status()
-            data = response.json()
+            infer_response = None
+            for attempt in range(5):
+                infer_response = client.post(infer_url, headers=headers, json=payload)
+                if infer_response.status_code != 429:
+                    break
+                time.sleep(min(2**attempt, 10))
+            if infer_response is None:
+                raise RuntimeError("No response from inference endpoint")
+            infer_response.raise_for_status()
+            data = infer_response.json()
             choices = data.get("choices") or []
             output_text = choices[0].get("message", {}).get("content") if choices else ""
             # Keep only minimal structured metadata; avoid relaying internal reasoning traces.
-            sanitized_choices = [
-                {
-                    "index": c.get("index"),
-                    "finish_reason": c.get("finish_reason"),
-                    "message": {
-                        "role": (c.get("message") or {}).get("role"),
-                        "content": (c.get("message") or {}).get("content"),
-                    },
-                }
-                for c in choices
-            ]
             return {
                 "output_text": output_text or "",
-                "id": data.get("id", ""),
                 "model": data.get("model", self.settings.default_model),
-                "usage": data.get("usage", {}),
-                "choices": sanitized_choices,
+                "usage": {
+                    "prompt_tokens": (data.get("usage") or {}).get("prompt_tokens", 0),
+                    "completion_tokens": (data.get("usage") or {}).get("completion_tokens", 0),
+                    "total_tokens": (data.get("usage") or {}).get("total_tokens", 0),
+                },
+                "finish_reason": (choices[0].get("finish_reason") if choices else None),
             }
 
 
@@ -156,10 +164,14 @@ class MockDigitalOceanAgentClient:
     def run_agent(self, agent_id: str, prompt: str) -> dict[str, Any]:
         agent = self._created.get(agent_id, {"name": "unknown"})
         return {
-            "id": f"resp-{agent_id}",
             "output_text": (
                 f"[{agent['name']}] analyzed prompt. "
                 f"Top-line answer: {prompt[:240]}"
             ),
-            "metadata": {"mock": True},
+            "model": self.settings.default_model,
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            "finish_reason": "stop",
         }
+
+    def delete_agent(self, agent_id: str) -> None:
+        self._created.pop(agent_id, None)
