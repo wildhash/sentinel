@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import httpx
@@ -43,13 +44,45 @@ class DigitalOceanAgentClient:
             "region": self.settings.do_region,
         }
         with httpx.Client(timeout=30) as client:
-            response = client.post(self._agents_url(), headers=self._headers, json=payload)
+            response = None
+            for attempt in range(5):
+                response = client.post(self._agents_url(), headers=self._headers, json=payload)
+                if response.status_code != 429:
+                    break
+                time.sleep(min(2**attempt, 10))
+
+            if response is not None and response.status_code == 429:
+                reused = self._find_reusable_agent(spec.name)
+                if reused:
+                    return reused
+
+            if response is None:
+                raise RuntimeError("No response received from DigitalOcean create_agent call")
+
             response.raise_for_status()
             data = response.json()
             # Normalize: DO returns {"agent": {...}} with "uuid" as the id field
             agent = data.get("agent", data)
             agent["id"] = agent.get("uuid") or agent.get("id") or data.get("id", "")
             return agent
+
+    def _find_reusable_agent(self, generated_name: str) -> dict[str, Any] | None:
+        # Names are generated as sentinel-<role>-<suffix>; reuse the latest matching base role.
+        base_name = "-".join(generated_name.split("-")[:-1])
+        with httpx.Client(timeout=30) as client:
+            response = client.get(self._agents_url(), headers=self._headers)
+            response.raise_for_status()
+            agents = response.json().get("agents", [])
+
+        candidates = [a for a in agents if (a.get("name") or "").startswith(base_name)]
+        if not candidates:
+            return None
+
+        # API list is typically newest-first; sort defensively by updated_at when present.
+        candidates.sort(key=lambda a: a.get("updated_at", ""), reverse=True)
+        agent = candidates[0]
+        agent["id"] = agent.get("uuid") or agent.get("id")
+        return agent
 
     def run_agent(self, agent_id: str, prompt: str) -> dict[str, Any]:
         # DigitalOcean separates management (agent CRUD) and inference (model access key).
@@ -78,8 +111,27 @@ class DigitalOceanAgentClient:
             response = client.post(infer_url, headers=headers, json=payload)
             response.raise_for_status()
             data = response.json()
-            output_text = (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
-            return {"output_text": output_text, **data}
+            choices = data.get("choices") or []
+            output_text = choices[0].get("message", {}).get("content") if choices else ""
+            # Keep only minimal structured metadata; avoid relaying internal reasoning traces.
+            sanitized_choices = [
+                {
+                    "index": c.get("index"),
+                    "finish_reason": c.get("finish_reason"),
+                    "message": {
+                        "role": (c.get("message") or {}).get("role"),
+                        "content": (c.get("message") or {}).get("content"),
+                    },
+                }
+                for c in choices
+            ]
+            return {
+                "output_text": output_text or "",
+                "id": data.get("id", ""),
+                "model": data.get("model", self.settings.default_model),
+                "usage": data.get("usage", {}),
+                "choices": sanitized_choices,
+            }
 
 
 class MockDigitalOceanAgentClient:
