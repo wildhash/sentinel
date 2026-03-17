@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import uuid
+
 from sentinel.config import Settings
 from sentinel.models import AgentSpec, TaskType
 
@@ -9,6 +11,7 @@ class AgentFactory:
         self.settings = settings
 
     def build(self, task: TaskType, objective: str) -> AgentSpec:
+        suffix = uuid.uuid4().hex[:8]
         base = {
             "model": self.settings.default_model,
             "tags": ["sentinel", task.value, self.settings.workspace],
@@ -16,7 +19,7 @@ class AgentFactory:
 
         if task is TaskType.recall:
             return AgentSpec(
-                name="sentinel-recall",
+                name=f"sentinel-recall-{suffix}",
                 role="memory_recall_specialist",
                 system_prompt=(
                     "You are a high-precision memory retrieval agent. "
@@ -28,7 +31,7 @@ class AgentFactory:
 
         if task is TaskType.contradiction:
             return AgentSpec(
-                name="sentinel-contradiction",
+                name=f"sentinel-contradiction-{suffix}",
                 role="consistency_auditor",
                 system_prompt=(
                     "You detect timeline, budget, and ownership contradictions. "
@@ -40,7 +43,7 @@ class AgentFactory:
 
         if task is TaskType.next_action:
             return AgentSpec(
-                name="sentinel-next-action",
+                name=f"sentinel-next-action-{suffix}",
                 role="operations_planner",
                 system_prompt=(
                     "You transform findings into a pragmatic, risk-aware action plan "
@@ -51,7 +54,7 @@ class AgentFactory:
             )
 
         return AgentSpec(
-            name="sentinel-summarize",
+            name=f"sentinel-summarize-{suffix}",
             role="executive_summarizer",
             system_prompt=(
                 "You produce concise executive summaries with explicit uncertainty. "

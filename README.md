@@ -37,7 +37,14 @@ Set your values in `.env`:
 - `DO_API_TOKEN`
 - `DO_AGENT_BASE_URL`
 - `DO_GENAI_API_VERSION`
+- `DO_PROJECT_ID`
+- `DO_REGION`
+- `DO_MODEL_ACCESS_KEY` (required for live inference at `inference.do-ai.run`)
 - `SENTINEL_ENABLE_MOCK=false` to use live DigitalOcean APIs
+
+DigitalOcean flow:
+- Agent management: `DO_API_TOKEN` against `api.digitalocean.com/v2/gen-ai`
+- Inference: `DO_MODEL_ACCESS_KEY` against `inference.do-ai.run`
 
 ### 3) Run
 
@@ -71,11 +78,11 @@ sentinel run-json "Summarize the memory risks" --context-file docs/sample-knowle
 
 ## Notes on DigitalOcean Integration
 
-The code uses a generic GenAI REST pattern:
-- `POST /{version}/gen-ai/agents`
-- `POST /{version}/gen-ai/agents/{id}/responses`
+The code uses DigitalOcean GenAI v2 management + inference split:
+- `POST /v2/gen-ai/agents` for dynamic agent creation
+- `POST https://inference.do-ai.run/v1/chat/completions` for model inference
 
-If your account uses different endpoints or payloads, adjust only `src/sentinel/do_client.py`.
+If your account uses different payload requirements, adjust only `src/sentinel/do_client.py`.
 
 ## Testing
 
