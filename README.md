@@ -1,6 +1,6 @@
-# EverMem Sentinel
+# Sentinel
 
-EverMem Sentinel is an autonomous multi-agent memory operations system designed for DigitalOcean GenAI. It dynamically creates specialist agents per mission, runs them as a coordinated swarm, then merges outputs into a final operator-ready response.
+Sentinel is an autonomous multi-agent memory operations system designed for DigitalOcean GenAI. It dynamically creates specialist agents per mission, runs them as a coordinated swarm, then merges outputs into a final operator-ready response.
 
 ## Why this is different
 
