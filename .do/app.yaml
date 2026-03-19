@@ -1,0 +1,29 @@
+name: sentinel
+region: tor
+services:
+  - name: web
+    github:
+      repo: wildhash/sentinel
+      branch: main
+      deploy_on_push: true
+    run_command: gunicorn -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT} --worker-tmp-dir /dev/shm --workers 1 server:app
+    environment_slug: python
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    instance_count: 1
+    http_port: 8080
+    envs:
+      - key: DO_API_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+      - key: DO_MODEL_ACCESS_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: SENTINEL_ENABLE_MOCK
+        scope: RUN_TIME
+        value: "false"
+      - key: SENTINEL_DEFAULT_MODEL
+        scope: RUN_TIME
+        value: deepseek-r1-distill-llama-70b
+      - key: SENTINEL_WORKSPACE
+        scope: RUN_TIME
+        value: evermem
